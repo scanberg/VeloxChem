@@ -1623,6 +1623,240 @@ class LinearResponseEigenSolver(LinearSolver):
 
         plt.show()
 
+    # Ported version from VALET (https://github.com/tbmasood/VALET/tree/main) with permission given from the author, Talha Bin Masood
+    @staticmethod
+    def _compute_transition_matrix(detachment_charges, attachment_charges):
+        T_complete = []
+        for i in range(len(detachment_charges)):
+            T_complete.append([0] * len(detachment_charges))
+        donors = []
+        acceptors = []
+        charge_diff = []
+        for i in range(len(detachment_charges)):
+            gs_charge = detachment_charges[i]
+            es_charge = attachment_charges[i]
+            if gs_charge > es_charge:
+                donors.append(i)
+            else:
+                acceptors.append(i)
+            diff = es_charge - gs_charge
+            T_complete[i][i] = min(gs_charge, es_charge)
+            charge_diff.append(diff)
+
+        total_acceptor_charge = 0
+        for acceptor in acceptors:
+            total_acceptor_charge = total_acceptor_charge + charge_diff[acceptor]
+
+        # heuristic
+        for donor in donors:
+            charge_deficit = -charge_diff[donor]
+            for acceptor in acceptors:
+                contrib = charge_deficit * \
+                    (charge_diff[acceptor]) / total_acceptor_charge
+                T_complete[acceptor][donor] = contrib
+
+        return T_complete
+
+    # Ported version from VALET (https://github.com/tbmasood/VALET/tree/main) with permission given from the author, Talha Bin Masood
+    def plot_transition_diagram(self,
+        rpa_results,
+        subgroup_names,
+        subgroup_atoms,
+        transition_index=0,
+        title="Transition Diagram"):
+        """
+        Plots a transition diagram for a given transition index.
+        :param rpa_results:
+            The dictionary containing RPA results.
+        :param subgroup_names:
+            A list of subgroup names.
+        :param subgroup_atoms:
+            A list of lists, where each sublist contains atom indices for the corresponding subgroup.
+        :param transition_index:
+            The index of the transition to plot.
+        :param title:
+            The title of the plot.
+        """
+
+        assert_msg_critical('matplotlib' in sys.modules,
+                            'matplotlib is required.')
+        
+        src_detach_str = 'detachment_charges' + str(transition_index+1)
+        src_attach_str = 'attachment_charges' + str(transition_index+1)
+
+        # Check that rpa_results contains detachment and attachment charges
+        assert_msg_critical(
+            src_detach_str in rpa_results and
+            src_attach_str in rpa_results,
+            'rpa_results must contain detachment_charges and attachment_charges.')
+        
+        # Get the correct arrays from rpa_results, currently they are stored in attach_charges_Sx where x is the transition index from 1..N
+        src_detachment_charges = rpa_results[src_detach_str]
+        src_attachment_charges = rpa_results[src_attach_str]
+
+        assert_msg_critical(
+            num_atoms == len(src_attachment_charges),
+            'Detachment and attachment charges must have the same length.')
+
+        num_atoms = len(src_detachment_charges)
+
+        # Ensure that the subgroup data is consistent (same length)
+        if (len(subgroup_names) !=
+                len(subgroup_atoms)):
+            assert_msg_critical(
+                False,
+                'subgroup_names and subgroup_atoms must have the same length.')
+
+        num_subgroups = len(subgroup_names) + 1  # +1 for 'Unassigned' subgroup
+        # Initialize subgroup map to 0, which corresponds to 'Unassigned'
+        sg_atom_map = {atom: 0 for atom in range(num_atoms)}
+
+        # Assign atoms to their respective subgroups
+        for i, atoms in enumerate(subgroup_atoms):
+            for atom in atoms:
+                sg_atom_map[atom] = i + 1 # map atom index to subgroup index
+        
+        sg_names = ['Unassigned'] + subgroup_names
+
+        # Assign charges to subgroups
+        sg_detachment_charges = [0.0] * num_subgroups
+        sg_attachment_charges = [0.0] * num_subgroups
+
+        for atom_idx, sg_idx in sg_atom_map.items():
+            sg_detachment_charges[sg_idx] += src_detachment_charges[atom_idx]
+            sg_attachment_charges[sg_idx] += src_attachment_charges[atom_idx]
+
+        sg_matrix = self._compute_transition_matrix(sg_detachment_charges, sg_attachment_charges)
+
+        WIDTH = 700
+        HEIGHT = 700
+        PADDING_TOP = 0.05
+        PADDING_LEFT = 0.08
+        BAR_THICKNESS = 0.04
+        GAP = 0.035
+        FLOW_GAP = 0.0
+        TEXT_GAP = 0.06
+        TITLE_GAP = 0.12
+
+        import matplotlib.pyplot as plt
+        import matplotlib.path as mpath
+        import matplotlib.lines as mlines
+        import matplotlib.patches as mpatches
+
+        fig, ax = plt.subplots()
+
+        topPadding = HEIGHT * PADDING_TOP
+        leftPadding = WIDTH * PADDING_LEFT
+        barHeight = HEIGHT * BAR_THICKNESS
+        textHeight = HEIGHT * TEXT_GAP
+        titleHeight = HEIGHT * TITLE_GAP
+
+        availableWidth = (1.0 - 2 * PADDING_LEFT -
+                        (num_subgroups - 1) * GAP) * WIDTH
+
+        colors = ["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3",
+                "#a6d854", "#ffd92f", "#e5c494", "#b3b3b3"]
+
+        # draw ES bars
+        xCoordsES = [0] * num_subgroups
+        total = 0.0
+        topY = HEIGHT - topPadding - textHeight - titleHeight - barHeight
+
+        plt.text(WIDTH / 2, HEIGHT - titleHeight, title,
+                ha="center", family="serif", size=16)
+
+        for i in range(num_subgroups):
+            x = leftPadding + total * availableWidth + i * GAP * WIDTH
+            barWidth = sg_attachment_charges[i] * availableWidth
+
+            percent = "%.2f%%" % (sg_attachment_charges[i] * 100)
+            plt.text(x + barWidth / 2, topY + 6 + barHeight,
+                    sg_names[i], ha="center", family="sans-serif", size=10)
+            plt.text(x + barWidth / 2, topY + 28 + barHeight, percent,
+                    ha="center", family="monospace", size=10)
+            rect = mpatches.Rectangle(
+                [x, topY], barWidth, barHeight, facecolor=colors[i % len(colors)], ec="black", lw=0.5)
+            ax.add_patch(rect)
+
+            xCoordsES[i] = x
+            total = total + sg_attachment_charges[i]
+
+        # draw GS bars
+        xCoordsGS = [0] * num_subgroups
+        total = 0.0
+        bottomY = topPadding + textHeight
+
+        for i in range(num_subgroups):
+            x = leftPadding + total * availableWidth + i * GAP * WIDTH
+            barWidth = sg_detachment_charges[i] * availableWidth
+
+            percent = "%.2f%%" % (sg_detachment_charges[i] * 100)
+            plt.text(x + barWidth / 2, bottomY - 22,
+                    sg_names[i], ha="center", family="sans-serif", size=10)
+            plt.text(x + barWidth / 2, bottomY - 44, percent,
+                    ha="center", family="monospace", size=10)
+            rect = mpatches.Rectangle(
+                [x, bottomY], barWidth, barHeight, facecolor=colors[i % len(colors)], ec="black", lw=0.5)
+            ax.add_patch(rect)
+
+            xCoordsGS[i] = x
+            total = total + sg_detachment_charges[i]
+
+        # draw connectors
+        propoFilledES = [0] * num_subgroups
+        propoFilledGS = [0] * num_subgroups
+
+        for i in range(num_subgroups):
+            xGS = xCoordsGS[i]
+            for j in range(num_subgroups):
+                if sg_matrix[j][i] == 0.0:
+                    continue
+
+                xES = xCoordsES[j]
+                flow = sg_matrix[j][i]
+                propGS = propoFilledGS[i]
+                propES = propoFilledES[j]
+
+                bottomXleft = xGS + availableWidth * propGS
+                bottomXright = xGS + availableWidth * (propGS + flow)
+                yb = bottomY + barHeight + FLOW_GAP * HEIGHT
+                topXleft = xES + availableWidth * propES
+                topXright = xES + availableWidth * (propES + flow)
+                yt = topY - FLOW_GAP * HEIGHT
+                yMiddle = (yt + yb) / 2
+
+                # add a path patch
+                Path = mpath.Path
+                path_data = [
+                    (Path.MOVETO, [bottomXleft, yb]),
+                    (Path.CURVE4, [bottomXleft, yMiddle]),
+                    (Path.CURVE4, [topXleft, yMiddle]),
+                    (Path.CURVE4, [topXleft, yt]),
+                    (Path.LINETO, [topXright, yt]),
+                    (Path.CURVE4, [topXright, yMiddle]),
+                    (Path.CURVE4, [bottomXright, yMiddle]),
+                    (Path.CURVE4, [bottomXright, yb]),
+                    (Path.CLOSEPOLY, [bottomXleft, yb])
+                ]
+                codes, verts = zip(*path_data)
+                path = mpath.Path(verts, codes)
+                patch = mpatches.PathPatch(
+                    path, facecolor=colors[i % len(colors)], alpha=0.4, ec="none")
+                ax.add_patch(patch)
+
+                if flow > 0.05:
+                    percent = "%.2f%%" % (flow * 100)
+                    plt.text((topXleft + topXright + bottomXleft + bottomXright)/ 4,
+                        yMiddle, percent, ha="center", family="monospace", size=10)
+
+                propoFilledGS[i] = propoFilledGS[i] + flow
+                propoFilledES[j] = propoFilledES[j] + flow
+
+        plt.axis('equal')
+        plt.axis('off')
+        plt.tight_layout()
+        plt.show()
+
     @staticmethod
     def get_absorption_spectrum(rsp_results, x_data, x_unit, b_value, b_unit):
         """

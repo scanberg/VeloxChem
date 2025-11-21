@@ -1659,15 +1659,15 @@ class LinearResponseEigenSolver(LinearSolver):
 
     # Ported version from VALET (https://github.com/tbmasood/VALET/tree/main) with permission given from the author, Talha Bin Masood
     def plot_transition_diagram(self,
-        rpa_results,
+        rsp_results,
         subgroup_names,
         subgroup_atoms,
         transition_index=0,
         title="Transition Diagram"):
         """
         Plots a transition diagram for a given transition index.
-        :param rpa_results:
-            The dictionary containing RPA results.
+        :param rsp_results:
+            The dictionary containing RSP results.
         :param subgroup_names:
             A list of subgroup names.
         :param subgroup_atoms:
@@ -1681,21 +1681,21 @@ class LinearResponseEigenSolver(LinearSolver):
         assert_msg_critical('matplotlib' in sys.modules,
                             'matplotlib is required.')
         
-        src_detach_str = 'detachment_charges' + str(transition_index+1)
-        src_attach_str = 'attachment_charges' + str(transition_index+1)
+        src_detach_str = 'detach_charges_S' + str(transition_index+1)
+        src_attach_str = 'attach_charges_S' + str(transition_index+1)
 
         # Check that rpa_results contains detachment and attachment charges
         assert_msg_critical(
-            src_detach_str in rpa_results and
-            src_attach_str in rpa_results,
-            'rpa_results must contain detachment_charges and attachment_charges.')
+            src_detach_str in rsp_results and
+            src_attach_str in rsp_results,
+            'rsp_results must contain detachment_charges and attachment_charges.')
         
         # Get the correct arrays from rpa_results, currently they are stored in attach_charges_Sx where x is the transition index from 1..N
-        src_detachment_charges = rpa_results[src_detach_str]
-        src_attachment_charges = rpa_results[src_attach_str]
+        src_detachment_charges = rsp_results[src_detach_str]
+        src_attachment_charges = rsp_results[src_attach_str]
 
         assert_msg_critical(
-            num_atoms == len(src_attachment_charges),
+            len(src_detachment_charges) == len(src_attachment_charges),
             'Detachment and attachment charges must have the same length.')
 
         num_atoms = len(src_detachment_charges)
@@ -1714,6 +1714,9 @@ class LinearResponseEigenSolver(LinearSolver):
         # Assign atoms to their respective subgroups
         for i, atoms in enumerate(subgroup_atoms):
             for atom in atoms:
+                if (atom >= num_atoms):
+                    print("Invalid atom idx supplied in subgroup: %{} is out of range", atom)
+                    continue
                 sg_atom_map[atom] = i + 1 # map atom index to subgroup index
         
         sg_names = ['Unassigned'] + subgroup_names
@@ -1723,8 +1726,8 @@ class LinearResponseEigenSolver(LinearSolver):
         sg_attachment_charges = [0.0] * num_subgroups
 
         for atom_idx, sg_idx in sg_atom_map.items():
-            sg_detachment_charges[sg_idx] += src_detachment_charges[atom_idx]
-            sg_attachment_charges[sg_idx] += src_attachment_charges[atom_idx]
+            sg_detachment_charges[sg_idx] += abs(src_detachment_charges[atom_idx]);
+            sg_attachment_charges[sg_idx] += abs(src_attachment_charges[atom_idx]);
 
         sg_matrix = self._compute_transition_matrix(sg_detachment_charges, sg_attachment_charges)
 

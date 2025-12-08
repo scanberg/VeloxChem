@@ -171,7 +171,7 @@ class ScfDriver:
         self.ovl_thresh = 1.0e-6
         self.diis_thresh = 1000.0
         self.eri_thresh = 1.0e-12
-        self.eri_thresh_tight = 1.0e-15
+        self.eri_thresh_tight = 1.0e-13
 
         # iterations data
         self._history = None
@@ -312,6 +312,8 @@ class ScfDriver:
                 'level_shifting_delta': ('float', 'level shifting delta'),
                 'conv_thresh': ('float', 'SCF convergence threshold'),
                 'eri_thresh': ('float', 'ERI screening threshold'),
+                'eri_thresh_tight':
+                    ('float', 'tightened ERI screening threshold'),
                 'ovl_thresh': ('float', 'AO linear dependency threshold'),
                 'restart': ('bool', 'restart from checkpoint file'),
                 'filename': ('str', 'base name of output files'),
@@ -1358,7 +1360,7 @@ class ScfDriver:
             The profiler.
         """
 
-        self._scf_results = None
+        self._scf_results = {}
 
         self._scf_prop = FirstOrderProperties(self.comm, self.ostream)
 
@@ -1782,7 +1784,8 @@ class ScfDriver:
                         self._scf_results[key] = getattr(self, key)
 
             else:
-                self._scf_results = None
+                # non-master rank
+                self._scf_results = {}
                 self._density = AODensityMatrix()
 
             self._scf_prop.compute_scf_prop(molecule, ao_basis,
@@ -1793,6 +1796,10 @@ class ScfDriver:
                     self._scf_prop.get_property('dipole_moment'))
 
                 self._write_final_hdf5(molecule, ao_basis)
+
+        else:
+            # not converged (or end of first step)
+            self._scf_results = {}
 
         if self.rank == mpi_master():
             self._print_scf_finish(diis_start_time)
